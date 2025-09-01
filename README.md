@@ -520,5 +520,142 @@ while True:
 ```
 
 ---
+```python name=api/__init__.py
+# empty
+```
 
-Let me know when these are in place or say "next batch" to continue!
+```python name=api/main.py
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from api.predictor import get_predictor
+
+app = FastAPI(title="Free Football Predictor", version="1.0")
+
+class PredictionRequest(BaseModel):
+    home: str
+    away: str
+    kickoff: str
+
+class PredictionResponse(BaseModel):
+    home: float
+    draw: float
+    away: float
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "version": "1.0"}
+
+@app.post("/predict", response_model=PredictionResponse)
+def predict_match(req: PredictionRequest):
+    predictor = get_predictor()
+    probs = predictor.predict(req.home, req.away, req.kickoff)
+    return PredictionResponse(home=probs[0], draw=probs[1], away=probs[2])
+```
+
+```python name=api/predictor.py
+import joblib, redis, json, numpy as np, pymc as pm
+from models.online_model import clf
+
+redis_client = redis.Redis(host="redis", port=6379, decode_responses=True)
+
+class BayesianStackPredictor:
+    def __init__(self, path="models/bayesian_stack_post.nc"):
+        import arviz as az
+        self.idata = az.from_netcdf(path)
+        self.w = self.idata.posterior["w"].mean(dim=("chain", "draw")).values
+        self.intercept = self.idata.posterior["intercept"].mean(dim=("chain", "draw")).values
+
+    def predict(self, rf, lgb, graph):
+        X = np.concatenate([rf, lgb, graph])
+        logits = self.intercept + X @ self.w.T
+        return pm.math.softmax(logits).eval()
+
+class OnlinePredictor:
+    def predict(self, *args):
+        # dummy feature extraction
+        x = {"dummy": 0.5}
+        proba = clf.predict_proba_one(x)
+        return [proba.get(0, 0), proba.get(1, 0), proba.get(2, 0)]
+
+def get_predictor():
+    version = redis_client.get("model_version")
+    if version == "online_rf":
+        return OnlinePredictor()
+    return BayesianStackPredictor()
+```
+
+```python name=dashboard/__init__.py
+# empty
+```
+
+```python name=dashboard/app.py
+import streamlit as st, requests
+st.set_page_config(page_title="Free Football Predictions", layout="wide")
+st.title("🌍 Global Free Football Predictions")
+
+home = st.text_input("Home Team")
+away = st.text_input("Away Team")
+kickoff = st.date_input("Kick-off Date")
+
+if st.button("Predict"):
+    r = requests.post("http://api:8000/predict", json={"home": home, "away": away, "kickoff": str(kickoff)})
+    if r.ok:
+        st.json(r.json())
+    else:
+        st.error("API unreachable")
+```
+
+```python name=monitoring/__init__.py
+# empty
+```
+
+```python name=monitoring/drift_detector.py
+from evidently.report import Report
+from evidently.metrics import DataDriftPreset
+import pandas as pd
+
+def detect_drift(current_df: pd.DataFrame, reference_df: pd.DataFrame, threshold: float = 0.05) -> bool:
+    report = Report(metrics=[DataDriftPreset()])
+    report.run(reference_data=reference_df, current_data=current_df)
+    score = report.as_dict()["metrics"][0]["result"]["dataset_drift"]["score"]
+    return score > threshold
+```
+
+```python name=tests/__init__.py
+# empty
+```
+
+```python name=tests/integration/__init__.py
+# empty
+```
+
+```python name=tests/integration/test_full_pipeline.py
+# (add your integration test code here)
+```
+
+```python name=tests/unit/__init__.py
+# empty
+```
+
+```python name=tests/unit/test_sb360.py
+# (add your unit test for sb360 here)
+```
+
+```python name=tests/unit/test_elo.py
+# (add your unit test for elo here)
+```
+
+```python name=tests/unit/test_graphformer.py
+# (add your unit test for graphformer here)
+```
+
+```python name=tests/unit/test_bayesian_stack.py
+# (add your unit test for bayesian_stack here)
+```
+
+```text name=models/.gitkeep
+# empty file to keep the models directory tracked in git
+```
+
+
+
