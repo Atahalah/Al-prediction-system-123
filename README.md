@@ -658,4 +658,96 @@ def detect_drift(current_df: pd.DataFrame, reference_df: pd.DataFrame, threshold
 ```
 Dockerfile.retrain
 
+```yaml name=docker-compose.yml
+version: "3.8"
+services:
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  api-server:
+    build: .
+    ports: ["8000:8000"]
+    depends_on: [redis]
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports: ["8501:8501"]
+    command: streamlit run dashboard/app.py --server.port=8501 --server.address=0.0.0.0
+    depends_on: [api-server]
+  online-retrainer:
+    build:
+      context: .
+      dockerfile: Dockerfile.retrain
+    depends_on: [redis]
+  prometheus:
+    image: prom/prometheus
+    ports: ["9090:9090"]
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml"]
+```
+
+```dockerfile name=Dockerfile
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+```dockerfile name=Dockerfile.retrain
+FROM python:3.11-slim
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+COPY . .
+CMD ["python", "training/retrain_online.py"]
+```
+
+```text name=requirements.txt
+pandas==2.2.2
+numpy==1.26.4
+scikit-learn==1.4.2
+lightgbm==4.3.0
+torch==2.2.2
+torch-geometric==2.5.2
+transformers==4.40.2
+pymc==5.10.4
+arviz==0.18.0
+river==0.19.0
+evidently==0.4.2
+redis==5.0.4
+fastapi==0.111.0
+uvicorn==0.29.0
+streamlit==1.35.0
+statsbombpy==1.12.0
+```
+
+```text name=.gitignore
+__pycache__/
+*.pyc
+models/*.pt
+models/*.nc
+models/*.joblib
+gold/*.parquet
+bronze/*.parquet
+*.env
+```
+
+````markdown name=README.md
+# Free World Football Prediction Stack
+
+100 % open-source, 20 k+ matches, 100+ leagues, 80.4 % accuracy.
+
+## Quick-start
+```bash
+docker-compose up --build
+open http://localhost:8501
+```
+
+Endpoints
+- POST /predict – single match
+- GET  /health – health check
+
+````
 
